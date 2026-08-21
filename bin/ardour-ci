@@ -106,7 +106,7 @@ deps_build() {
   # GLib 2.56.4 declares locals after g_return_val_if_fail(), which its
   # strict C90 warning set treats as an error on modern Apple Clang.
   if ! grep -Fq 'glib-2.56.4-c99-declarations.patch' "$tools/x-applearm.sh"; then
-    run perl -0pi -e "s@(src glib-2\\.56\\.4 tar\\.xz [^\\n]+\\n)(LIBFFI_CFLAGS)@\$1patch -p1 < '$CI_ROOT/patches/glib-2.56.4-c99-declarations.patch'\\n\$2@" "$tools/x-applearm.sh"
+    run perl -0pi -e "s@(src glib-2\\.56\\.4 tar\\.xz [^\\n]+\\n(?:patch -p1 < '$CI_ROOT/patches/glib-2.56.4-python-3.12.patch'\\n)?)(LIBFFI_CFLAGS)@\$1patch -p1 < '$CI_ROOT/patches/glib-2.56.4-c99-declarations.patch'\\n\$2@" "$tools/x-applearm.sh"
   fi
   [ "$DRY_RUN" -eq 1 ] || git -C "$tools" cat-file -e "$revision^{commit}" 2>/dev/null || die "build-stack revision is unavailable: $revision"
   instrument_stack_recipe "$tools"
