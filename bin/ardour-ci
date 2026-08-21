@@ -68,7 +68,10 @@ deps_sync() {
   local response revision
   if [ -n "$STACK_REV_OVERRIDE" ]; then revision=$STACK_REV_OVERRIDE
   elif [ "$DRY_RUN" -eq 1 ]; then note "dry-run: would fetch $NIGHTLY_INFO_URL and update $LOCK_FILE"; return 0
-  else response=$(curl -fsSL --retry 3 "$NIGHTLY_INFO_URL") || die "failed to fetch nightly host information"; revision=$(printf '%s\n' "$response" | sed -nE 's/^[[:space:]]*build-stack:[[:space:]]*([0-9a-f]{40}).*/\1/p' | head -n 1); fi
+  else
+    response=$(curl -fsSL --retry 3 "$NIGHTLY_INFO_URL") || die "failed to fetch nightly host information"
+    revision=$(printf '%s\n' "$response" | grep -Eio 'build-stack([^0-9a-f]|&[a-z]+;)*[0-9a-f]{40}' | grep -Eio '[0-9a-f]{40}' | head -n 1)
+  fi
   [ -n "${revision:-}" ] || die "build-stack revision was not found in nightly host information"
   [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || die "invalid build-stack revision: $revision"
   write_file "$LOCK_FILE" "build_stack_rev=$revision"
@@ -82,9 +85,13 @@ deps_build() {
   [ -d "$tools/.git" ] || run git clone "$BUILD_STACK_URL" "$tools"
   run git -C "$tools" fetch --tags origin
   run git -C "$tools" checkout --detach "$revision"
+  # libffi 3.4.2 needs the upstream Darwin ARM64 CFI fix on modern Apple Clang.
+  run perl -0pi -e "s@(src libffi-3\\.4\\.2 tar\\.gz [^\\n]+\\n)(PREFIX=.*nativebuild)@\$1patch -p1 < '$CI_ROOT/patches/libffi-3.4.2-darwin-arm64-cfi.patch'\\n\$2@" "$tools/x-applearm.sh"
   [ "$DRY_RUN" -eq 1 ] || git -C "$tools" cat-file -e "$revision^{commit}" 2>/dev/null || die "build-stack revision is unavailable: $revision"
   run mkdir -p "$root" "$downloads"
-  run env "BUILDROOT=$root" "SRCDIR=$downloads" "CONCURRENCY=-j$JOBS" bash "$tools/x-applearm.sh"
+  # GLib 2.56.4 uses legacy __sync pointer atomics that Apple Clang 15+
+  # diagnoses as integer-to-pointer conversions.
+  run env "BUILDROOT=$root" "SRCDIR=$downloads" "CONCURRENCY=-j$JOBS" "CFLAGS=-Wno-incompatible-function-pointer-types -Wno-int-conversion" bash "$tools/x-applearm.sh"
   write_file "$root/.built-rev" "$revision"
   note "dependency stack built: $root"
 }

@@ -56,7 +56,7 @@ assert_contains "$output" "worktree=dirty"
 
 REV=0123456789abcdef0123456789abcdef01234567
 mkdir -p "$MOCK_BIN"
-printf '#!/usr/bin/env bash\nprintf "    build-stack: %%s\\n" "0123456789abcdef0123456789abcdef01234567"\n' > "$MOCK_BIN/curl"
+printf '#!/usr/bin/env bash\nprintf "    build-stack&colon; %%s&NewLine;\n" "0123456789abcdef0123456789abcdef01234567"\n' > "$MOCK_BIN/curl"
 chmod +x "$MOCK_BIN/curl"
 PATH="$MOCK_BIN:$PATH" "$CLI" --work-dir "$WORK" deps sync >/dev/null
 output=$(cat "$WORK/build-stack.lock")

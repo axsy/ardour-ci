@@ -1,1 +1,32 @@
+# Local pipeline state, dependency stacks, downloads, and generated artifacts
 .work/
+
+# Local configuration and environment files
+.env
+.env.*
+!.env.example
+
+# macOS Finder metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Editor and IDE state
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files, logs, and patch rejects
+*.log
+*.tmp
+*.bak
+*.orig
+*.rej
+
+# Test and coverage output
+.coverage
+coverage/
