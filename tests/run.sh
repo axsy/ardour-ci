@@ -88,6 +88,84 @@ test "$FIRST_COMMIT" != "$SECOND_COMMIT" || { printf 'source commit did not chan
 test -f "$WORK/builds/$SECOND_COMMIT/metadata" || { printf 'missing second build metadata\n' >&2; exit 1; }
 assert_contains "$(readlink "$SOURCE_ONE/build")" "$WORK/builds/$SECOND_COMMIT"
 
+make_stack_tools() {
+    local directory=$1
+    mkdir -p "$directory"
+    git init -q "$directory"
+    git -C "$directory" config user.email test@example.invalid
+    git -C "$directory" config user.name Test
+    cat > "$directory/x-applearm.sh" <<'EOF'
+#!/usr/bin/env bash
+set -e
+: ${BUILDROOT:?}
+: ${SRCDIR:?}
+: ${PREFIX=${BUILDROOT}/gtk/inst}
+: ${BLDDEP=${BUILDROOT}/gtk/tool}
+: ${BUILDD=${BUILDROOT}/gtk/src}
+src() { :; }
+rm -rf ${PREFIX}
+rm -rf ${BUILDD}
+rm -rf ${BLDDEP}
+mkdir -p ${PREFIX}
+mkdir -p ${BUILDD}
+mkdir -p ${BLDDEP}
+src alpha-1 tar.gz https://example.invalid/alpha.tar.gz
+printf 'alpha\n' >> "$STEP_LOG"
+src beta-1 tar.gz https://example.invalid/beta.tar.gz
+printf 'beta\n' >> "$STEP_LOG"
+[ ! -f "$FAIL_BETA" ] || exit 42
+src gamma-1 tar.gz https://example.invalid/gamma.tar.gz
+printf 'gamma\n' >> "$STEP_LOG"
+[ ! -f "$FAIL_GAMMA" ] || exit 43
+EOF
+    chmod +x "$directory/x-applearm.sh"
+    git -C "$directory" add x-applearm.sh
+    git -C "$directory" commit -qm stack
+}
+
+TOOLS_REPO="$TEST_ROOT/build-tools"
+RESUME_WORK="$TEST_ROOT/resume-work"
+STEP_LOG="$TEST_ROOT/steps.log"
+FAIL_BETA="$TEST_ROOT/fail-beta"
+FAIL_GAMMA="$TEST_ROOT/fail-gamma"
+export STEP_LOG FAIL_BETA FAIL_GAMMA
+make_stack_tools "$TOOLS_REPO"
+RESUME_REV=$(git -C "$TOOLS_REPO" rev-parse HEAD)
+mkdir -p "$RESUME_WORK"
+printf 'build_stack_rev=%s\n' "$RESUME_REV" > "$RESUME_WORK/build-stack.lock"
+touch "$FAIL_BETA"
+set +e
+resume_output=$(ARDOUR_CI_BUILD_STACK_URL="$TOOLS_REPO" "$CLI" --work-dir "$RESUME_WORK" deps build 2>&1)
+resume_status=$?
+set -e
+test "$resume_status" -ne 0 || { printf 'mock dependency build unexpectedly succeeded\n' >&2; exit 1; }
+RESUME_STACK="$RESUME_WORK/stacks/$RESUME_REV"
+test ! -f "$RESUME_STACK/.built-rev" || { printf 'failed stack was marked ready\n' >&2; exit 1; }
+test -f "$RESUME_STACK/.resume/state/001-alpha-1" || { printf 'first checkpoint is missing\n%s\n' "$resume_output" >&2; exit 1; }
+test -d "$RESUME_STACK/.resume/snapshots/001-alpha-1" || { printf 'first snapshot is missing\n' >&2; exit 1; }
+test ! -f "$RESUME_STACK/.resume/state/002-beta-1" || { printf 'failed step has a checkpoint\n' >&2; exit 1; }
+
+rm "$FAIL_BETA"
+touch "$FAIL_GAMMA"
+set +e
+resume_output=$(ARDOUR_CI_BUILD_STACK_URL="$TOOLS_REPO" "$CLI" --work-dir "$RESUME_WORK" deps build 2>&1)
+resume_status=$?
+set -e
+test "$resume_status" -ne 0 || { printf 'second mock dependency build unexpectedly succeeded\n' >&2; exit 1; }
+test -f "$RESUME_STACK/.resume/state/002-beta-1" || { printf 'second checkpoint is missing\n' >&2; exit 1; }
+test "$(grep -c '^alpha$' "$STEP_LOG")" -eq 1 || { printf 'completed dependency was rebuilt\n%s\n' "$resume_output" >&2; exit 1; }
+
+sed -i.bak 's/printf '\''beta\\n'\''/printf '\''beta-v2\\n'\''/' "$RESUME_WORK/build-tools/$RESUME_REV/x-applearm.sh"
+rm "$FAIL_GAMMA"
+ARDOUR_CI_BUILD_STACK_URL="$TOOLS_REPO" "$CLI" --work-dir "$RESUME_WORK" deps build >/dev/null
+test -f "$RESUME_STACK/.built-rev" || { printf 'completed stack has no ready marker\n' >&2; exit 1; }
+test ! -d "$RESUME_STACK/.resume" || { printf 'resume state survived successful build\n' >&2; exit 1; }
+test "$(grep -c '^alpha$' "$STEP_LOG")" -eq 1 || { printf 'unchanged earlier dependency was rebuilt\n' >&2; exit 1; }
+assert_contains "$(cat "$STEP_LOG")" "beta-v2"
+ready_output=$(ARDOUR_CI_BUILD_STACK_URL="$TOOLS_REPO" "$CLI" --work-dir "$RESUME_WORK" deps build 2>&1)
+assert_contains "$ready_output" "dependency stack is ready"
+test ! -d "$RESUME_STACK/.resume" || { printf 'ready stack created resume state\n' >&2; exit 1; }
+
 if [ "$fail" -ne 0 ]; then
     printf '%s test assertion(s) failed\n' "$fail" >&2
     exit 1

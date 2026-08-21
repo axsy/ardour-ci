@@ -185,13 +185,22 @@ Use `--stack-rev <40-hex-commit>` to lock or build a specific upstream
 build-stack commit. The stack itself is stored under
 `.work/stacks/<build-stack-commit>/`.
 
+If a dependency fails, fix the issue and rerun `deps build` or `all`. The
+pipeline retains per-dependency checkpoints under that stack's `.resume/`
+directory, restores the last successful installation snapshot, and continues
+at the failed dependency. Checkpoints include the recipe fragment and build
+flags: changing a workaround rebuilds that dependency and its later dependents,
+while retaining earlier ones. `.built-rev` is still written only after the
+entire stack succeeds; a completed stack bypasses the resume mechanism.
+
 ## Cleanup and troubleshooting
 
 `./bin/ardour-ci clean` removes only the configured work directory. It never
 deletes the Ardour checkout. Run `doctor` first when a tool is missing or the
 host architecture is unsupported. For a failed dependency build, retain
 `.work/downloads/` to avoid downloading source archives again, then rerun
-`deps build` after addressing the failure.
+`deps build` after addressing the failure. `clean` also removes incomplete
+stack checkpoints and their snapshots.
 
 Use `make test` to run the mocked CLI test suite.
 

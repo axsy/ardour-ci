@@ -50,6 +50,14 @@ stack_root() { printf '%s/stacks/%s\n' "$WORK_DIR" "$(stack_rev)"; }
 gtk_root() { printf '%s/gtk/inst\n' "$(stack_root)"; }
 ensure_stack() { local root; root=$(stack_root); [ -f "$root/.built-rev" ] && [ "$(cat "$root/.built-rev")" = "$(stack_rev)" ] && [ -d "$root/gtk/inst" ] || die "dependency stack is not built; run: ardour-ci deps build"; }
 command_exists() { command -v "$1" >/dev/null 2>&1; }
+instrument_stack_recipe() {
+  local tools=$1 recipe="$1/x-applearm.sh" transformed="$1/x-applearm.resumable.sh"
+  [ -f "$recipe" ] || die "build-stack recipe is missing: $recipe"
+  awk -f "$CI_ROOT/tools/instrument-x-applearm.awk" "$recipe" > "$transformed" || die "unsupported build-stack recipe; update the resumable recipe instrumenter"
+  [ -s "$transformed" ] || die "failed to instrument build-stack recipe"
+  grep -Fq '# Added by ardour-ci: per-dependency checkpoint and snapshot support.' "$transformed" || die "unsupported build-stack recipe; update the resumable recipe instrumenter"
+  chmod +x "$transformed"
+}
 
 doctor() {
   [ "$(uname -s)" = Darwin ] || die "macOS is required"
@@ -78,21 +86,36 @@ deps_sync() {
   note "locked build-stack revision: $revision"
 }
 deps_build() {
-  local revision root tools downloads
+  local revision root tools downloads resume
   revision=$(stack_rev); root="$WORK_DIR/stacks/$revision"; tools="$WORK_DIR/build-tools/$revision"; downloads="$WORK_DIR/downloads"
   if [ -f "$root/.built-rev" ] && [ "$(cat "$root/.built-rev")" = "$revision" ] && [ -d "$root/gtk/inst" ]; then note "dependency stack is ready: $root"; return; fi
   ensure_work_dir
+  resume="$root/.resume"
   [ -d "$tools/.git" ] || run git clone "$BUILD_STACK_URL" "$tools"
   run git -C "$tools" fetch --tags origin
   run git -C "$tools" checkout --detach "$revision"
   # libffi 3.4.2 needs the upstream Darwin ARM64 CFI fix on modern Apple Clang.
   run perl -0pi -e "s@(src libffi-3\\.4\\.2 tar\\.gz [^\\n]+\\n)(PREFIX=.*nativebuild)@\$1patch -p1 < '$CI_ROOT/patches/libffi-3.4.2-darwin-arm64-cfi.patch'\\n\$2@" "$tools/x-applearm.sh"
+  # The recipe still names libffi 3.2.1's private include directory, but it
+  # builds libffi 3.4.2, which installs its public headers in include/.
+  run perl -0pi -e 's@-I\$\{BLDDEP\}/lib/libffi-3\.2\.1/include@-I\${BLDDEP}/include@g' "$tools/x-applearm.sh"
+  # GLib 2.56.4's GDBus generator imports distutils, removed in Python 3.12.
+  if ! grep -Fq 'glib-2.56.4-python-3.12.patch' "$tools/x-applearm.sh"; then
+    run perl -0pi -e "s@(src glib-2\\.56\\.4 tar\\.xz [^\\n]+\\n)(LIBFFI_CFLAGS)@\$1patch -p1 < '$CI_ROOT/patches/glib-2.56.4-python-3.12.patch'\\n\$2@" "$tools/x-applearm.sh"
+  fi
+  # GLib 2.56.4 declares locals after g_return_val_if_fail(), which its
+  # strict C90 warning set treats as an error on modern Apple Clang.
+  if ! grep -Fq 'glib-2.56.4-c99-declarations.patch' "$tools/x-applearm.sh"; then
+    run perl -0pi -e "s@(src glib-2\\.56\\.4 tar\\.xz [^\\n]+\\n)(LIBFFI_CFLAGS)@\$1patch -p1 < '$CI_ROOT/patches/glib-2.56.4-c99-declarations.patch'\\n\$2@" "$tools/x-applearm.sh"
+  fi
   [ "$DRY_RUN" -eq 1 ] || git -C "$tools" cat-file -e "$revision^{commit}" 2>/dev/null || die "build-stack revision is unavailable: $revision"
+  instrument_stack_recipe "$tools"
   run mkdir -p "$root" "$downloads"
   # GLib 2.56.4 uses legacy __sync pointer atomics that Apple Clang 15+
   # diagnoses as integer-to-pointer conversions.
-  run env "BUILDROOT=$root" "SRCDIR=$downloads" "CONCURRENCY=-j$JOBS" "CFLAGS=-Wno-incompatible-function-pointer-types -Wno-int-conversion" bash "$tools/x-applearm.sh"
+  run env "BUILDROOT=$root" "SRCDIR=$downloads" "RESUME_DIR=$resume" "BUILD_STACK_REV=$revision" "CONCURRENCY=-j$JOBS" "CFLAGS=-Wno-incompatible-function-pointer-types -Wno-int-conversion" bash "$tools/x-applearm.resumable.sh"
   write_file "$root/.built-rev" "$revision"
+  [ "$DRY_RUN" -eq 1 ] || rm -rf "$resume"
   note "dependency stack built: $root"
 }
 build_dir() { printf '%s/builds/%s\n' "$WORK_DIR" "$(current_commit)"; }
