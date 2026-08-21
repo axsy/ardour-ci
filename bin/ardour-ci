@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# A local macOS ARM64 build pipeline for a separately checked-out Ardour tree.
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+CI_ROOT=$(cd "$SCRIPT_DIR/.." && pwd -P)
+WORK_DIR=${ARDOUR_CI_WORK_DIR:-"$CI_ROOT/.work"}
+CONFIG_FILE="$WORK_DIR/config"
+LOCK_FILE="$WORK_DIR/build-stack.lock"
+NIGHTLY_INFO_URL=${ARDOUR_CI_NIGHTLY_INFO_URL:-"https://nightly.ardour.org/i/A_MAC_arm64/info.txt"}
+BUILD_STACK_URL=${ARDOUR_CI_BUILD_STACK_URL:-"git://git.ardour.org/ardour/ardour-build-tools.git"}
+DRY_RUN=0
+SOURCE_OVERRIDE=""
+STACK_REV_OVERRIDE=""
+JOBS=${ARDOUR_CI_JOBS:-"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"}
+
+usage() {
+cat <<'EOF'
+Usage: ardour-ci [--source PATH] [--work-dir PATH] [--jobs N] [--stack-rev SHA] [--dry-run] COMMAND
+
+Commands:
+  config set-source PATH   Save the Ardour source directory in local configuration.
+  config show              Show effective local configuration.
+  source status            Show the selected Ardour revision and worktree state.
+  doctor                   Check the macOS ARM64 build prerequisites.
+  deps sync                Lock the current official macOS ARM64 build-stack revision.
+  deps build               Build or reuse the isolated dependency stack.
+  build                    Configure and compile the selected Ardour revision.
+  package                  Create an unsigned public Ardour.app and DMG.
+  all                      Run doctor, deps build, build, and package.
+  clean                    Remove only this pipeline's .work directory.
+
+The source checkout is never pulled, rebased, or checked out by this tool.
+EOF
+}
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+note() { printf '%s\n' "$*" >&2; }
+run() { printf '+ ' >&2; printf '%q ' "$@" >&2; printf '\n' >&2; [ "$DRY_RUN" -eq 1 ] || "$@"; }
+canonical_dir() { [ -d "$1" ] || die "directory does not exist: $1"; (cd "$1" && pwd -P); }
+ensure_work_dir() { mkdir -p "$WORK_DIR"; }
+write_file() { [ "$DRY_RUN" -eq 1 ] || { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" > "$1"; }; }
+read_config_source() { [ ! -f "$CONFIG_FILE" ] || sed -n 's/^source_path=//p' "$CONFIG_FILE" | head -n 1; }
+source_path() { local selected; if [ -n "$SOURCE_OVERRIDE" ]; then selected=$SOURCE_OVERRIDE; else selected=$(read_config_source); selected=${selected:-"$CI_ROOT/../ardour"}; fi; canonical_dir "$selected"; }
+require_source() { SOURCE_PATH=$(source_path); git -C "$SOURCE_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not a Git checkout: $SOURCE_PATH"; }
+current_commit() { git -C "$SOURCE_PATH" rev-parse HEAD; }
+current_tag() { git -C "$SOURCE_PATH" describe --tags --exact-match HEAD 2>/dev/null || true; }
+read_locked_stack_rev() { [ ! -f "$LOCK_FILE" ] || sed -n 's/^build_stack_rev=//p' "$LOCK_FILE" | head -n 1; }
+stack_rev() { local revision; revision=${STACK_REV_OVERRIDE:-"$(read_locked_stack_rev)"}; [ -n "$revision" ] || die "no build-stack revision is locked; run: ardour-ci deps sync"; [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || die "invalid build-stack revision: $revision"; printf '%s\n' "$revision"; }
+stack_root() { printf '%s/stacks/%s\n' "$WORK_DIR" "$(stack_rev)"; }
+gtk_root() { printf '%s/gtk/inst\n' "$(stack_root)"; }
+ensure_stack() { local root; root=$(stack_root); [ -f "$root/.built-rev" ] && [ "$(cat "$root/.built-rev")" = "$(stack_rev)" ] && [ -d "$root/gtk/inst" ] || die "dependency stack is not built; run: ardour-ci deps build"; }
+command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+doctor() {
+  [ "$(uname -s)" = Darwin ] || die "macOS is required"
+  [ "$(uname -m)" = arm64 ] || die "native Apple Silicon (arm64) is required"
+  local tool
+  for tool in git curl make patch perl python3 xcode-select hdiutil otool install_name_tool; do command_exists "$tool" || die "required tool is unavailable: $tool"; done
+  xcode-select -p >/dev/null 2>&1 || die "Xcode Command Line Tools are not selected"
+  note "doctor: macOS ARM64 build prerequisites are available"
+}
+config_set_source() { [ "$#" -eq 1 ] || die "usage: ardour-ci config set-source PATH"; local selected; selected=$(canonical_dir "$1"); ensure_work_dir; write_file "$CONFIG_FILE" "source_path=$selected"; note "configured Ardour source: $selected"; }
+config_show() { printf 'source_path=%s\nwork_dir=%s\nlock_file=%s\nnightly_info_url=%s\n' "$(source_path)" "$WORK_DIR" "$LOCK_FILE" "$NIGHTLY_INFO_URL"; }
+source_status() { require_source; local branch tag dirty; branch=$(git -C "$SOURCE_PATH" symbolic-ref --short -q HEAD || printf detached); tag=$(current_tag); dirty=clean; [ -z "$(git -C "$SOURCE_PATH" status --porcelain)" ] || dirty=dirty; printf 'source_path=%s\nbranch=%s\ncommit=%s\ntag=%s\nworktree=%s\n' "$SOURCE_PATH" "$branch" "$(current_commit)" "${tag:-none}" "$dirty"; }
+
+deps_sync() {
+  ensure_work_dir
+  local response revision
+  if [ -n "$STACK_REV_OVERRIDE" ]; then revision=$STACK_REV_OVERRIDE
+  elif [ "$DRY_RUN" -eq 1 ]; then note "dry-run: would fetch $NIGHTLY_INFO_URL and update $LOCK_FILE"; return 0
+  else response=$(curl -fsSL --retry 3 "$NIGHTLY_INFO_URL") || die "failed to fetch nightly host information"; revision=$(printf '%s\n' "$response" | sed -nE 's/^[[:space:]]*build-stack:[[:space:]]*([0-9a-f]{40}).*/\1/p' | head -n 1); fi
+  [ -n "${revision:-}" ] || die "build-stack revision was not found in nightly host information"
+  [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || die "invalid build-stack revision: $revision"
+  write_file "$LOCK_FILE" "build_stack_rev=$revision"
+  note "locked build-stack revision: $revision"
+}
+deps_build() {
+  local revision root tools downloads
+  revision=$(stack_rev); root="$WORK_DIR/stacks/$revision"; tools="$WORK_DIR/build-tools/$revision"; downloads="$WORK_DIR/downloads"
+  if [ -f "$root/.built-rev" ] && [ "$(cat "$root/.built-rev")" = "$revision" ] && [ -d "$root/gtk/inst" ]; then note "dependency stack is ready: $root"; return; fi
+  ensure_work_dir
+  [ -d "$tools/.git" ] || run git clone "$BUILD_STACK_URL" "$tools"
+  run git -C "$tools" fetch --tags origin
+  run git -C "$tools" checkout --detach "$revision"
+  [ "$DRY_RUN" -eq 1 ] || git -C "$tools" cat-file -e "$revision^{commit}" 2>/dev/null || die "build-stack revision is unavailable: $revision"
+  run mkdir -p "$root" "$downloads"
+  run env "BUILDROOT=$root" "SRCDIR=$downloads" "CONCURRENCY=-j$JOBS" bash "$tools/x-applearm.sh"
+  write_file "$root/.built-rev" "$revision"
+  note "dependency stack built: $root"
+}
+build_dir() { printf '%s/builds/%s\n' "$WORK_DIR" "$(current_commit)"; }
+prepare_build_link() {
+  local target=$1 link="$SOURCE_PATH/build"
+  if [ -L "$link" ]; then
+    if [ "$(readlink "$link")" = "$target" ]; then return; fi
+    case "$(readlink "$link")" in
+      "$WORK_DIR"/builds/*) [ "$DRY_RUN" -eq 1 ] || { rm "$link"; ln -s "$target" "$link"; };;
+      *) die "source build link belongs to another build: $link";;
+    esac
+  elif [ -e "$link" ]; then die "refusing to replace existing source build path: $link"
+  elif [ "$DRY_RUN" -eq 0 ]; then ln -s "$target" "$link"; fi
+}
+write_build_metadata() {
+  local directory=$1 artifact=${2:-} tag content
+  tag=$(current_tag)
+  content=$(printf 'ardour_commit=%s\nardour_tag=%s\nbuild_stack_rev=%s\nconfiguration=--arm64 --optimize\nartifact=%s' "$(current_commit)" "${tag:-none}" "$(stack_rev)" "${artifact:-none}")
+  write_file "$directory/metadata" "$content"
+}
+build_ardour() {
+  require_source; ensure_stack
+  local directory gtk
+  directory=$(build_dir); gtk=$(gtk_root)
+  run mkdir -p "$directory"; prepare_build_link "$directory"
+  run env "PATH=$gtk/bin:$PATH" "PKG_CONFIG_PATH=$gtk/lib/pkgconfig" "DEPSTACK_ROOT=$(stack_root)" "$SOURCE_PATH/waf" configure "--out=$directory" --arm64 --optimize "--depstack-root=$(stack_root)"
+  run env "PATH=$gtk/bin:$PATH" "PKG_CONFIG_PATH=$gtk/lib/pkgconfig" "DEPSTACK_ROOT=$(stack_root)" "$SOURCE_PATH/waf" "--out=$directory" -j "$JOBS"
+  write_build_metadata "$directory"; note "Ardour built: $directory"
+}
+package_ardour() {
+  require_source; ensure_stack
+  local directory gtk packaging artifacts app dmg artifact_app
+  directory=$(build_dir); [ -d "$directory" ] || die "Ardour is not built for $(current_commit); run: ardour-ci build"
+  gtk=$(gtk_root); prepare_build_link "$directory"; packaging="$SOURCE_PATH/tools/osx_packaging"; artifacts="$WORK_DIR/artifacts/$(current_commit)"
+  run mkdir -p "$artifacts"
+  if [ "$DRY_RUN" -eq 1 ]; then note "dry-run: would run $packaging/osx_build --public --stack $gtk"; return; fi
+  (cd "$packaging" && CACHEDIR="$WORK_DIR/video-cache" ./osx_build --public --stack "$gtk")
+  app=$(find "$packaging/Ardour" -maxdepth 1 -type d -name '*.app' -print -quit); [ -n "$app" ] || die "packaging did not create Ardour.app"
+  artifact_app="$artifacts/$(basename "$app")"; rm -rf "$artifact_app"; ditto "$app" "$artifact_app"
+  dmg=$(find "$packaging" -maxdepth 1 -type f -name 'Ardour-*.dmg' -print -quit); [ -z "$dmg" ] || cp "$dmg" "$artifacts/$(basename "$dmg")"
+  write_build_metadata "$directory" "$artifact_app"; note "package created: $artifact_app"
+}
+clean_work() { [ "$WORK_DIR" != "$CI_ROOT" ] || die "refusing to remove repository root"; [ "$DRY_RUN" -eq 1 ] && { note "dry-run: would remove $WORK_DIR"; return; }; rm -rf "$WORK_DIR"; note "removed pipeline work directory: $WORK_DIR"; }
+
+parse_global_options() {
+  REMAINING=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --source) SOURCE_OVERRIDE=${2:-}; [ -n "$SOURCE_OVERRIDE" ] || die "--source requires a path"; shift 2;;
+      --work-dir) WORK_DIR=${2:-}; [ -n "$WORK_DIR" ] || die "--work-dir requires a path"; CONFIG_FILE="$WORK_DIR/config"; LOCK_FILE="$WORK_DIR/build-stack.lock"; shift 2;;
+      --jobs) JOBS=${2:-}; [[ "$JOBS" =~ ^[1-9][0-9]*$ ]] || die "--jobs must be a positive integer"; shift 2;;
+      --stack-rev) STACK_REV_OVERRIDE=${2:-}; [ -n "$STACK_REV_OVERRIDE" ] || die "--stack-rev requires a revision"; shift 2;;
+      --dry-run) DRY_RUN=1; shift;;
+      --help|-h) usage; exit 0;;
+      *) REMAINING+=("$1"); shift;;
+    esac
+  done
+}
+parse_global_options "$@"; set -- "${REMAINING[@]}"
+case "${1:-}" in
+  config) case "${2:-}" in set-source) config_set_source "${3:-}";; show) config_show;; *) die "usage: ardour-ci config {set-source PATH|show}";; esac;;
+  source) [ "${2:-}" = status ] || die "usage: ardour-ci source status"; source_status;;
+  doctor) doctor;;
+  deps) case "${2:-}" in sync) deps_sync;; build) deps_build;; *) die "usage: ardour-ci deps {sync|build}";; esac;;
+  build) build_ardour;; package) package_ardour;; all) doctor; deps_build; build_ardour; package_ardour;; clean) clean_work;;
+  ""|help) usage;; *) die "unknown command: $1";;
+esac
