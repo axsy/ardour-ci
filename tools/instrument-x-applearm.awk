@@ -52,6 +52,12 @@ BEGIN { reset = 0; in_steps = 0; step = ""; body = "" }
     else emit_step()
     step = $0
   }
+  # uuid-1.6.2's bundled configure macro expects an implementation identifier,
+  # not a boolean.  The upstream ARM recipe's `yes` expands to the nonexistent
+  # __VA_COPY_USE_yes macro with current Apple Clang.
+  if (step ~ /^src[ \t]+uuid-1\.6\.2([ \t]|$)/ && $0 == "ac_cv_va_copy=yes autoconfbuild") {
+    $0 = "ac_cv_va_copy=C99 autoconfbuild"
+  }
   if (in_steps) body = body $0 "\n"
   else print
 }
