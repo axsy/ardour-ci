@@ -99,6 +99,10 @@ deps_build() {
   # The recipe still names libffi 3.2.1's private include directory, but it
   # builds libffi 3.4.2, which installs its public headers in include/.
   run perl -0pi -e 's@-I\$\{BLDDEP\}/lib/libffi-3\.2\.1/include@-I\${BLDDEP}/include@g' "$tools/x-applearm.sh"
+  # Python 2.7 predates Apple Silicon and rejects `arch`'s arm64 result.
+  if ! grep -Fq 'python-2.7.18-macos-arm64.patch' "$tools/x-applearm.sh"; then
+    run perl -0pi -e "s@(src Python-2\.7\.18 tar\.xz [^\n]+\n)(PREFIX=)@\$1patch -p1 < '$CI_ROOT/patches/python-2.7.18-macos-arm64.patch'\n\$2@" "$tools/x-applearm.sh"
+  fi
   # GLib 2.56.4's GDBus generator imports distutils, removed in Python 3.12.
   if ! grep -Fq 'glib-2.56.4-python-3.12.patch' "$tools/x-applearm.sh"; then
     run perl -0pi -e "s@(src glib-2\\.56\\.4 tar\\.xz [^\\n]+\\n)(LIBFFI_CFLAGS)@\$1patch -p1 < '$CI_ROOT/patches/glib-2.56.4-python-3.12.patch'\\n\$2@" "$tools/x-applearm.sh"
