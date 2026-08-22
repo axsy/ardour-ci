@@ -102,6 +102,12 @@ deps_build() {
   # The recipe still names libffi 3.2.1's private include directory, but it
   # builds libffi 3.4.2, which installs its public headers in include/.
   run perl -0pi -e 's@-I\$\{BLDDEP\}/lib/libffi-3\.2\.1/include@-I\${BLDDEP}/include@g' "$tools/x-applearm.sh"
+  # Cairo 1.16 treats any compiler diagnostic from its pthread probe as a
+  # failed probe.  Apple Clang warns about the recipe's C++-only --stdlib flag
+  # while linking that C probe, which would otherwise disable all mutexes.
+  if ! grep -Fq 'cairo-1.16.0-pthread-probe-warning' "$tools/x-applearm.sh"; then
+    run perl -0pi -e 's@ax_cv_c_float_words_bigendian=no \\\n@# cairo-1.16.0-pthread-probe-warning\nCFLAGS="$CFLAGS -Wno-unused-command-line-argument" \\\nax_cv_c_float_words_bigendian=no \\\n@' "$tools/x-applearm.sh"
+  fi
   # Python 2.7 predates Apple Silicon and rejects `arch`'s arm64 result.
   if ! grep -Fq 'python-2.7.18-macos-arm64.patch' "$tools/x-applearm.sh"; then
     run perl -0pi -e "s@(src Python-2\.7\.18 tar\.xz [^\n]+\n)(PREFIX=)@\$1patch -p1 < '$CI_ROOT/patches/python-2.7.18-macos-arm64.patch'\n\$2@" "$tools/x-applearm.sh"
