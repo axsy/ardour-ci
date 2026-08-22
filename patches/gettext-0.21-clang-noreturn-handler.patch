@@ -1,0 +1,33 @@
+--- a/gettext-tools/gnulib-lib/obstack.c
++++ b/gettext-tools/gnulib-lib/obstack.c
+@@ -348,7 +348,7 @@
+    abort gracefully or use longjump - but shouldn't return.  This
+    variable by default points to the internal function
+    'print_and_abort'.  */
+-__attribute_noreturn__ void (*obstack_alloc_failed_handler) (void)
++void (*obstack_alloc_failed_handler) (void)
+   = print_and_abort;
+ # endif /* !_OBSTACK_NO_ERROR_HANDLER */
+ #endif /* !_OBSTACK_ELIDE_CODE */
+--- a/gettext-tools/libgettextpo/obstack.c
++++ b/gettext-tools/libgettextpo/obstack.c
+@@ -348,7 +348,7 @@
+    abort gracefully or use longjump - but shouldn't return.  This
+    variable by default points to the internal function
+    'print_and_abort'.  */
+-__attribute_noreturn__ void (*obstack_alloc_failed_handler) (void)
++void (*obstack_alloc_failed_handler) (void)
+   = print_and_abort;
+ # endif /* !_OBSTACK_NO_ERROR_HANDLER */
+ #endif /* !_OBSTACK_ELIDE_CODE */
+--- a/libtextstyle/lib/obstack.c
++++ b/libtextstyle/lib/obstack.c
+@@ -348,7 +348,7 @@
+    abort gracefully or use longjump - but shouldn't return.  This
+    variable by default points to the internal function
+    'print_and_abort'.  */
+-__attribute_noreturn__ void (*obstack_alloc_failed_handler) (void)
++void (*obstack_alloc_failed_handler) (void)
+   = print_and_abort;
+ # endif /* !_OBSTACK_NO_ERROR_HANDLER */
+ #endif /* !_OBSTACK_ELIDE_CODE */

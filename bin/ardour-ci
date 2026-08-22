@@ -99,6 +99,11 @@ deps_build() {
   run perl -0pi -e 's@http://ftpmirror\.gnu\.org/@https://ftp.gnu.org/gnu/@g' "$tools/x-applearm.sh"
   # libffi 3.4.2 needs the upstream Darwin ARM64 CFI fix on modern Apple Clang.
   run perl -0pi -e "s@(src libffi-3\\.4\\.2 tar\\.gz [^\\n]+\\n)(PREFIX=.*nativebuild)@\$1patch -p1 < '$CI_ROOT/patches/libffi-3.4.2-darwin-arm64-cfi.patch'\\n\$2@" "$tools/x-applearm.sh"
+  # gettext 0.21 applies noreturn to the handler pointer but not its default
+  # implementation; recent Apple Clang rejects that function-pointer mismatch.
+  if ! grep -Fq 'gettext-0.21-clang-noreturn-handler.patch' "$tools/x-applearm.sh"; then
+    run perl -0pi -e "s@(src gettext-0\\.21 tar\\.gz [^\\n]+\\n)@\$1patch -p1 < '$CI_ROOT/patches/gettext-0.21-clang-noreturn-handler.patch'\\n@g" "$tools/x-applearm.sh"
+  fi
   # The recipe still names libffi 3.2.1's private include directory, but it
   # builds libffi 3.4.2, which installs its public headers in include/.
   run perl -0pi -e 's@-I\$\{BLDDEP\}/lib/libffi-3\.2\.1/include@-I\${BLDDEP}/include@g' "$tools/x-applearm.sh"
