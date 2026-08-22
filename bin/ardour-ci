@@ -94,6 +94,9 @@ deps_build() {
   [ -d "$tools/.git" ] || run git clone "$BUILD_STACK_URL" "$tools"
   run git -C "$tools" fetch --tags origin
   run git -C "$tools" checkout --detach "$revision"
+  # ftpmirror.gnu.org is currently returning HTTP 502 responses for the
+  # readline/termcap archives.  Use GNU's primary archive host instead.
+  run perl -0pi -e 's@http://ftpmirror\.gnu\.org/@https://ftp.gnu.org/gnu/@g' "$tools/x-applearm.sh"
   # libffi 3.4.2 needs the upstream Darwin ARM64 CFI fix on modern Apple Clang.
   run perl -0pi -e "s@(src libffi-3\\.4\\.2 tar\\.gz [^\\n]+\\n)(PREFIX=.*nativebuild)@\$1patch -p1 < '$CI_ROOT/patches/libffi-3.4.2-darwin-arm64-cfi.patch'\\n\$2@" "$tools/x-applearm.sh"
   # The recipe still names libffi 3.2.1's private include directory, but it
@@ -116,9 +119,19 @@ deps_build() {
   if ! grep -Fq 'automake-1.14-python-3.12.patch' "$tools/x-applearm.sh"; then
     run perl -0pi -e "s@(src glib-2\\.56\\.4 tar\\.xz [^\\n]+\\n(?:patch -p1 < '$CI_ROOT/patches/glib-2.56.4-python-3.12.patch'\\n)?(?:patch -p1 < '$CI_ROOT/patches/glib-2.56.4-c99-declarations.patch'\\n)?)(LIBFFI_CFLAGS)@\$1patch -p1 < '$CI_ROOT/patches/automake-1.14-python-3.12.patch'\\n\$2@" "$tools/x-applearm.sh"
   fi
+  # libvorbis 1.3.4 passes this obsolete Darwin linker flag through CFLAGS.
+  # Recent Apple ld no longer accepts it when linking its test utility.
+  if ! grep -Fq 'libvorbis-1.3.4-remove-force-cpusubtype' "$tools/x-applearm.sh"; then
+    run perl -0pi -e "s@(src libvorbis-1\\.3\\.4 tar\\.gz [^\\n]+\\n)(autoconfbuild)@\$1# libvorbis-1.3.4-remove-force-cpusubtype\nperl -pi -e 's/ -force_cpusubtype_ALL//g' configure\n\$2@" "$tools/x-applearm.sh"
+  fi
   [ "$DRY_RUN" -eq 1 ] || git -C "$tools" cat-file -e "$revision^{commit}" 2>/dev/null || die "build-stack revision is unavailable: $revision"
   instrument_stack_recipe "$tools"
   run mkdir -p "$root" "$downloads"
+  # A failed download is cached under the expected archive filename by the
+  # upstream recipe, so remove the known bad response before resuming.
+  if [ -f "$downloads/readline-8.2.tar.gz" ] && ! gzip -t "$downloads/readline-8.2.tar.gz" 2>/dev/null; then
+    run rm -f "$downloads/readline-8.2.tar.gz"
+  fi
   # GLib 2.56.4 uses legacy __sync pointer atomics that Apple Clang 15+
   # diagnoses as integer-to-pointer conversions.
   run env "BUILDROOT=$root" "SRCDIR=$downloads" "RESUME_DIR=$resume" "BUILD_STACK_REV=$revision" "CONCURRENCY=-j$JOBS" "CFLAGS=-Wno-incompatible-function-pointer-types -Wno-int-conversion" bash "$tools/x-applearm.resumable.sh"
