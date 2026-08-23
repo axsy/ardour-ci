@@ -36,6 +36,12 @@ EOF
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 note() { printf '%s\n' "$*" >&2; }
 run() { printf '+ ' >&2; printf '%q ' "$@" >&2; printf '\n' >&2; [ "$DRY_RUN" -eq 1 ] || "$@"; }
+run_in_dir() {
+  local directory=$1
+  shift
+  printf '+ (cd %q && ' "$directory" >&2; printf '%q ' "$@" >&2; printf ')\n' >&2
+  [ "$DRY_RUN" -eq 1 ] || (cd "$directory" && "$@")
+}
 canonical_dir() { [ -d "$1" ] || die "directory does not exist: $1"; (cd "$1" && pwd -P); }
 ensure_work_dir() { mkdir -p "$WORK_DIR"; }
 write_file() { [ "$DRY_RUN" -eq 1 ] || { mkdir -p "$(dirname "$1")"; printf '%s\n' "$2" > "$1"; }; }
@@ -197,32 +203,69 @@ prepare_build_link() {
   elif [ -e "$link" ]; then die "refusing to replace existing source build path: $link"
   elif [ "$DRY_RUN" -eq 0 ]; then ln -s "$target" "$link"; fi
 }
+prepare_packaging_share_link() {
+  local link="$(dirname "$(build_dir)")/share"
+  if [ -L "$link" ]; then
+    [ "$(readlink "$link")" = "$SOURCE_PATH/share" ] || die "packaging share link belongs to another source tree: $link"
+  elif [ -e "$link" ]; then
+    die "refusing to replace existing packaging share path: $link"
+  elif [ "$DRY_RUN" -eq 0 ]; then
+    ln -s "$SOURCE_PATH/share" "$link"
+  fi
+}
 write_build_metadata() {
   local directory=$1 artifact=${2:-} tag content
   tag=$(current_tag)
   content=$(printf 'ardour_commit=%s\nardour_tag=%s\nbuild_stack_rev=%s\nconfiguration=--arm64 --optimize\nartifact=%s' "$(current_commit)" "${tag:-none}" "$(stack_rev)" "${artifact:-none}")
   write_file "$directory/metadata" "$content"
 }
+copy_app_from_dmg() {
+  local dmg=$1 artifacts=$2 attachment device mount app destination
+  attachment=$(hdiutil attach -nobrowse -readonly -plist "$dmg")
+  device=$(printf '%s\n' "$attachment" | plutil -extract system-entities.0.dev-entry raw -)
+  [ -n "$device" ] || die "could not mount package DMG: $dmg"
+  mount=$(printf '%s\n' "$attachment" | plutil -extract system-entities.0.mount-point raw -)
+  if [ -z "$mount" ]; then
+    hdiutil detach "$device" >/dev/null 2>&1 || true
+    die "could not determine package DMG mount point: $dmg"
+  fi
+  app=$(find "$mount" -maxdepth 1 -type d -name '*.app' -print -quit)
+  if [ -z "$app" ]; then
+    hdiutil detach "$device" >/dev/null 2>&1 || true
+    die "package DMG does not contain an application bundle: $dmg"
+  fi
+  destination="$artifacts/$(basename "$app")"
+  rm -rf "$destination"
+  ditto "$app" "$destination"
+  hdiutil detach "$device" >/dev/null
+  printf '%s\n' "$destination"
+}
 build_ardour() {
   require_source; ensure_stack
   local directory gtk
   directory=$(build_dir); gtk=$(gtk_root)
   run mkdir -p "$directory"; prepare_build_link "$directory"
-  run env "PATH=$gtk/bin:$PATH" "PKG_CONFIG_PATH=$gtk/lib/pkgconfig" "DEPSTACK_ROOT=$(stack_root)" "$SOURCE_PATH/waf" configure "--out=$directory" --arm64 --optimize "--depstack-root=$(stack_root)"
-  run env "PATH=$gtk/bin:$PATH" "PKG_CONFIG_PATH=$gtk/lib/pkgconfig" "DEPSTACK_ROOT=$(stack_root)" "$SOURCE_PATH/waf" "--out=$directory" -j "$JOBS"
+  run_in_dir "$SOURCE_PATH" env "PATH=$gtk/bin:$PATH" "PKG_CONFIG_PATH=$gtk/lib/pkgconfig" "DEPSTACK_ROOT=$(stack_root)" ./waf configure "--out=$directory" --arm64 --optimize "--depstack-root=$(stack_root)"
+  run_in_dir "$SOURCE_PATH" env "PATH=$gtk/bin:$PATH" "PKG_CONFIG_PATH=$gtk/lib/pkgconfig" "DEPSTACK_ROOT=$(stack_root)" ./waf "--out=$directory" -j "$JOBS"
   write_build_metadata "$directory"; note "Ardour built: $directory"
 }
 package_ardour() {
   require_source; ensure_stack
   local directory gtk packaging artifacts app dmg artifact_app
   directory=$(build_dir); [ -d "$directory" ] || die "Ardour is not built for $(current_commit); run: ardour-ci build"
-  gtk=$(gtk_root); prepare_build_link "$directory"; packaging="$SOURCE_PATH/tools/osx_packaging"; artifacts="$WORK_DIR/artifacts/$(current_commit)"
+  gtk=$(gtk_root); prepare_build_link "$directory"; prepare_packaging_share_link; packaging="$SOURCE_PATH/tools/osx_packaging"; artifacts="$WORK_DIR/artifacts/$(current_commit)"
   run mkdir -p "$artifacts"
   if [ "$DRY_RUN" -eq 1 ]; then note "dry-run: would run $packaging/osx_build --public --stack $gtk"; return; fi
   (cd "$packaging" && CACHEDIR="$WORK_DIR/video-cache" ./osx_build --public --stack "$gtk")
-  app=$(find "$packaging/Ardour" -maxdepth 1 -type d -name '*.app' -print -quit); [ -n "$app" ] || die "packaging did not create Ardour.app"
-  artifact_app="$artifacts/$(basename "$app")"; rm -rf "$artifact_app"; ditto "$app" "$artifact_app"
-  dmg=$(find "$packaging" -maxdepth 1 -type f -name 'Ardour-*.dmg' -print -quit); [ -z "$dmg" ] || cp "$dmg" "$artifacts/$(basename "$dmg")"
+  dmg=$(find "$packaging" -maxdepth 1 -type f -name 'Ardour-*.dmg' -print -quit); [ -n "$dmg" ] || die "packaging did not create a DMG"
+  app=$(find "$packaging/Ardour" -maxdepth 1 -type d -name '*.app' -print -quit || true)
+  if [ -n "$app" ]; then
+    artifact_app="$artifacts/$(basename "$app")"
+    rm -rf "$artifact_app"; ditto "$app" "$artifact_app"
+  else
+    artifact_app=$(copy_app_from_dmg "$dmg" "$artifacts")
+  fi
+  cp "$dmg" "$artifacts/$(basename "$dmg")"
   write_build_metadata "$directory" "$artifact_app"; note "package created: $artifact_app"
 }
 clean_work() { [ "$WORK_DIR" != "$CI_ROOT" ] || die "refusing to remove repository root"; [ "$DRY_RUN" -eq 1 ] && { note "dry-run: would remove $WORK_DIR"; return; }; rm -rf "$WORK_DIR"; note "removed pipeline work directory: $WORK_DIR"; }
