@@ -127,12 +127,23 @@ git checkout <tag>
 cd ../ardour-ci
 ./bin/ardour-ci config set-source ../ardour
 ./bin/ardour-ci deps sync
-./bin/ardour-ci all
+./bin/ardour-ci deps build
+./bin/ardour-ci build
+./bin/ardour-ci package
 ```
 
 The `.app` and standard unsigned DMG are copied to
 `.work/artifacts/<ardour-commit>/`. The application bundle includes the video
 components requested by Ardour's `osx_build --public` packager.
+
+For a complete build after the source directory and build-stack revision are
+configured, the equivalent shorthand is:
+
+```bash
+./bin/ardour-ci all
+```
+
+It runs `doctor`, `deps build`, `build`, and `package` in that order.
 
 ## Commands
 
