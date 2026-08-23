@@ -9,6 +9,21 @@
    = print_and_abort;
  # endif /* !_OBSTACK_NO_ERROR_HANDLER */
  #endif /* !_OBSTACK_ELIDE_CODE */
+--- a/libtextstyle/lib/obstack.h
++++ b/libtextstyle/lib/obstack.h
+@@ -231 +231 @@
+-extern DLL_VARIABLE __attribute_noreturn__ void (*obstack_alloc_failed_handler) (void);
++extern DLL_VARIABLE void (*obstack_alloc_failed_handler) (void);
+--- a/gettext-tools/gnulib-lib/obstack.h
++++ b/gettext-tools/gnulib-lib/obstack.h
+@@ -231 +231 @@
+-extern DLL_VARIABLE __attribute_noreturn__ void (*obstack_alloc_failed_handler) (void);
++extern DLL_VARIABLE void (*obstack_alloc_failed_handler) (void);
+--- a/gettext-tools/libgettextpo/obstack.h
++++ b/gettext-tools/libgettextpo/obstack.h
+@@ -231 +231 @@
+-extern DLL_VARIABLE __attribute_noreturn__ void (*obstack_alloc_failed_handler) (void);
++extern DLL_VARIABLE void (*obstack_alloc_failed_handler) (void);
 --- a/gettext-tools/libgettextpo/obstack.c
 +++ b/gettext-tools/libgettextpo/obstack.c
 @@ -348,7 +348,7 @@

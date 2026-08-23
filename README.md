@@ -136,16 +136,27 @@ components requested by Ardour's `osx_build --public` packager.
 
 ## Commands
 
-```bash
-./bin/ardour-ci doctor
-./bin/ardour-ci config show
-./bin/ardour-ci source status
-./bin/ardour-ci deps sync
-./bin/ardour-ci deps build
-./bin/ardour-ci build
-./bin/ardour-ci package
-./bin/ardour-ci all
-```
+All commands are run as `./bin/ardour-ci <command>`.
+
+- `config set-source PATH` — saves the Ardour checkout directory for subsequent
+  commands.
+- `config show` — prints the effective source directory, work directory, lock
+  file, and nightly-information URL.
+- `source status` — shows the selected checkout's path, branch, commit, tag,
+  and whether it has uncommitted changes.
+- `doctor` — verifies that macOS ARM64 and all required host tools are
+  available.
+- `deps sync` — obtains the build-stack revision from the official ARM64
+  nightly information and records it in the lock file.
+- `deps build` — builds the locked dependency stack, or reuses it when it is
+  already complete.
+- `build` — configures and compiles the selected Ardour revision against the
+  built dependency stack.
+- `package` — packages a completed build as an unsigned public `.app` bundle
+  and DMG, then copies them to the artifacts directory.
+- `all` — runs `doctor`, `deps build`, `build`, and `package` in that order.
+- `clean` — removes only the configured pipeline work directory, including its
+  downloads, stacks, logs, and artifacts; it never removes the Ardour checkout.
 
 Use `--source /absolute/path/to/ardour` with any command to override the saved
 source directory. `--work-dir /path/to/cache` moves all pipeline state,

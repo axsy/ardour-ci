@@ -161,7 +161,8 @@ ARDOUR_CI_BUILD_STACK_URL="$TOOLS_REPO" "$CLI" --work-dir "$RESUME_WORK" deps bu
 test -f "$RESUME_STACK/.built-rev" || { printf 'completed stack has no ready marker\n' >&2; exit 1; }
 test ! -d "$RESUME_STACK/.resume" || { printf 'resume state survived successful build\n' >&2; exit 1; }
 test "$(grep -c '^alpha$' "$STEP_LOG")" -eq 1 || { printf 'unchanged earlier dependency was rebuilt\n' >&2; exit 1; }
-assert_contains "$(cat "$STEP_LOG")" "beta-v2"
+test "$(grep -c '^beta$' "$STEP_LOG")" -eq 2 || { printf 'locally modified recipe was not restored\n' >&2; exit 1; }
+test "$(grep -c '^beta-v2$' "$STEP_LOG")" -eq 0 || { printf 'locally modified recipe was used\n' >&2; exit 1; }
 ready_output=$(ARDOUR_CI_BUILD_STACK_URL="$TOOLS_REPO" "$CLI" --work-dir "$RESUME_WORK" deps build 2>&1)
 assert_contains "$ready_output" "dependency stack is ready"
 test ! -d "$RESUME_STACK/.resume" || { printf 'ready stack created resume state\n' >&2; exit 1; }
