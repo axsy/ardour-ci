@@ -33,3 +33,32 @@ index 6f0d832..0d6f2bf 100644
          v = '0'
 -    return (distutils.version.LooseVersion(v), key[1])
 +    return (_version_key(v), key[1])
+diff --git a/py-compile b/py-compile
+--- a/py-compile
++++ b/py-compile
+@@ -119,1 +119,6 @@
+-import sys, os, py_compile, imp
++import sys, os, py_compile
++try:
++    from importlib import util as importlib_util
++except ImportError:
++    import imp
++    importlib_util = None
+@@ -132,2 +137,2 @@
+-    if hasattr(imp, 'get_tag'):
+-        py_compile.compile(filepath, imp.cache_from_source(filepath), path)
++    if importlib_util is not None and hasattr(importlib_util, 'cache_from_source'):
++        py_compile.compile(filepath, importlib_util.cache_from_source(filepath), path)
+@@ -140,1 +145,6 @@
+-import sys, os, py_compile, imp
++import sys, os, py_compile
++try:
++    from importlib import util as importlib_util
++except ImportError:
++    import imp
++    importlib_util = None
+@@ -156,2 +166,2 @@
+-    if hasattr(imp, 'get_tag'):
+-        py_compile.compile(filepath, imp.cache_from_source(filepath, False), path)
++    if importlib_util is not None and hasattr(importlib_util, 'cache_from_source'):
++        py_compile.compile(filepath, importlib_util.cache_from_source(filepath, False), path)

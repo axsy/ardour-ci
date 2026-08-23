@@ -1,0 +1,22 @@
+--- a/src/hb.hh
++++ b/src/hb.hh
+@@ -64,7 +64,9 @@
+ 
+ #pragma GCC diagnostic error   "-Wc++11-narrowing"
+ #pragma GCC diagnostic error   "-Wcast-align"
++#if !defined(__apple_build_version__)
+ #pragma GCC diagnostic error   "-Wcast-function-type"
++#endif
+ #pragma GCC diagnostic error   "-Wdelete-non-virtual-dtor"
+ #pragma GCC diagnostic error   "-Wembedded-directive"
+ #pragma GCC diagnostic error   "-Wextra-semi-stmt"
+@@ -90,6 +92,9 @@
+ #pragma GCC diagnostic error   "-Wunused-variable"
+ #pragma GCC diagnostic error   "-Wvla"
+ #pragma GCC diagnostic error   "-Wwrite-strings"
++#if defined(__apple_build_version__)
++#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
++#endif
+ #endif
+ 
+ /* Warning.  To be investigated if happens. */

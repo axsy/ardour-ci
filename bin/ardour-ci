@@ -100,6 +100,18 @@ deps_build() {
   # ftpmirror.gnu.org is currently returning HTTP 502 responses for the
   # readline/termcap archives.  Use GNU's primary archive host instead.
   run perl -0pi -e 's@http://ftpmirror\.gnu\.org/@https://ftp.gnu.org/gnu/@g' "$tools/x-applearm.sh"
+  # pkgconfig.freedesktop.org intermittently drops TLS handshakes. Bazel keeps
+  # an immutable mirror of the identical pkg-config 0.29.2 release archive.
+  run perl -0pi -e 's@https?://pkg-?config\.freedesktop\.org/releases/pkg-config-0\.29\.2\.tar\.gz@https://mirror.bazel.build/pkgconfig.freedesktop.org/releases/pkg-config-0.29.2.tar.gz@g' "$tools/x-applearm.sh"
+  # www.freedesktop.org has the same TLS issue for the two remaining release
+  # archives used by this recipe. MacPorts mirrors the identical tarballs.
+  run perl -0pi -e 's@https?://www\.freedesktop\.org/software/fontconfig/release/fontconfig-2\.13\.1\.tar\.bz2@https://distfiles.macports.org/fontconfig/fontconfig-2.13.1.tar.bz2@g; s@https?://www\.freedesktop\.org/software/harfbuzz/release/harfbuzz-2\.6\.7\.tar\.xz@https://distfiles.macports.org/harfbuzz/harfbuzz-2.6.7.tar.xz@g' "$tools/x-applearm.sh"
+  # cairographics.org also drops TLS handshakes. Replace every archive this
+  # recipe fetches from it, including the ones reached after pixman.
+  run perl -0pi -e 's@https?://www\.cairographics\.org/releases/pixman-0\.42\.2\.tar\.gz@https://mirrors.omnios.org/pixman/pixman-0.42.2.tar.gz@g; s@https?://cairographics\.org/releases/cairo-1\.16\.0\.tar\.xz@https://mirrors.omnios.org/cairo/cairo-1.16.0.tar.xz@g; s@https?://cairographics\.org/releases/cairomm-1\.12\.2\.tar\.gz@https://distfiles.macports.org/cairomm/cairomm-1.12.2.tar.gz@g' "$tools/x-applearm.sh"
+  # Do not cache an HTTP error page or a truncated download under an archive
+  # name: the upstream script only tests for a file's existence when resuming.
+  run perl -0pi -e 's@echo "--- Downloading\.\. \$2"\ntest -f "\$\{SRCDIR\}/\$\{1\}" \|\| curl -k -L -o "\$\{SRCDIR\}/\$\{1\}" \$2@if test ! -f "\${SRCDIR}/\${1}"; then\n  echo "--- Downloading.. \$2"\n  curl -k --fail --location --retry 3 --output "\${SRCDIR}/\${1}.partial" "\$2" && mv "\${SRCDIR}/\${1}.partial" "\${SRCDIR}/\${1}"\nfi@g' "$tools/x-applearm.sh"
   # libffi 3.4.2 needs the upstream Darwin ARM64 CFI fix on modern Apple Clang.
   run perl -0pi -e "s@(src libffi-3\\.4\\.2 tar\\.gz [^\\n]+\\n)(PREFIX=.*nativebuild)@\$1patch --batch --forward -p1 < '$CI_ROOT/patches/libffi-3.4.2-darwin-arm64-cfi.patch'\\n\$2@g" "$tools/x-applearm.sh"
   # gettext 0.21 applies noreturn to the handler pointer but not its default
@@ -129,6 +141,11 @@ deps_build() {
   if ! grep -Fq 'glib-2.56.4-c99-declarations.patch' "$tools/x-applearm.sh"; then
     run perl -0pi -e "s@(src glib-2\\.56\\.4 tar\\.xz [^\\n]+\\n(?:patch --batch --forward -p1 < '$CI_ROOT/patches/glib-2.56.4-python-3.12.patch'\\n)?)@\$1patch --batch --forward -p1 < '$CI_ROOT/patches/glib-2.56.4-c99-declarations.patch'\\n@g" "$tools/x-applearm.sh"
   fi
+  # HarfBuzz 2.6.7 upgrades cast-function-type warnings to errors in its
+  # headers. Apple Clang 17 diagnoses additional valid legacy FreeType casts.
+  if ! grep -Fq 'harfbuzz-2.6.7-apple-clang-cast-function-type.patch' "$tools/x-applearm.sh"; then
+    run perl -0pi -e "s@(src harfbuzz-2\\.6\\.7 tar\\.xz [^\\n]+\\n)@\$1patch --batch --forward -p1 < '$CI_ROOT/patches/harfbuzz-2.6.7-apple-clang-cast-function-type.patch'\\n@g" "$tools/x-applearm.sh"
+  fi
   # Automake 1.14's py-compile imports imp, removed in Python 3.12.
   if ! grep -Fq 'automake-1.14-python-3.12.patch' "$tools/x-applearm.sh"; then
     run perl -0pi -e "s@(src automake-1\\.14\\.1 tar\\.gz [^\\n]+\\n)@\$1patch --batch --forward -p1 < '$CI_ROOT/patches/automake-1.14-python-3.12.patch'\\n@g" "$tools/x-applearm.sh"
@@ -146,9 +163,24 @@ deps_build() {
   if [ -f "$downloads/readline-8.2.tar.gz" ] && ! gzip -t "$downloads/readline-8.2.tar.gz" 2>/dev/null; then
     run rm -f "$downloads/readline-8.2.tar.gz"
   fi
+  if [ -f "$downloads/fontconfig-2.13.1.tar.bz2" ] && ! bzip2 -t "$downloads/fontconfig-2.13.1.tar.bz2" 2>/dev/null; then
+    run rm -f "$downloads/fontconfig-2.13.1.tar.bz2"
+  fi
+  if [ -f "$downloads/pixman-0.42.2.tar.gz" ] && ! gzip -t "$downloads/pixman-0.42.2.tar.gz" 2>/dev/null; then
+    run rm -f "$downloads/pixman-0.42.2.tar.gz"
+  fi
+  if [ -f "$downloads/cairo-1.16.0.tar.xz" ] && ! xz -t "$downloads/cairo-1.16.0.tar.xz" 2>/dev/null; then
+    run rm -f "$downloads/cairo-1.16.0.tar.xz"
+  fi
+  if [ -f "$downloads/cairomm-1.12.2.tar.gz" ] && ! gzip -t "$downloads/cairomm-1.12.2.tar.gz" 2>/dev/null; then
+    run rm -f "$downloads/cairomm-1.12.2.tar.gz"
+  fi
   # GLib 2.56.4 uses legacy __sync pointer atomics that Apple Clang 15+
-  # diagnoses as integer-to-pointer conversions.
-  run env "BUILDROOT=$root" "SRCDIR=$downloads" "RESUME_DIR=$resume" "BUILD_STACK_REV=$revision" "CONCURRENCY=-j$JOBS" "CFLAGS=-Wno-incompatible-function-pointer-types -Wno-int-conversion" bash "$tools/x-applearm.resumable.sh"
+  # diagnoses as integer-to-pointer conversions. Its cleanup macros also cast
+  # typed destructors to GDestroyNotify; newer Clang diagnoses that cast while
+  # building HarfBuzz with -Werror. HarfBuzz is C++, so this must be in
+  # CXXFLAGS as well as CFLAGS.
+  run env "BUILDROOT=$root" "SRCDIR=$downloads" "RESUME_DIR=$resume" "BUILD_STACK_REV=$revision" "CONCURRENCY=-j$JOBS" "CFLAGS=-Wno-incompatible-function-pointer-types -Wno-int-conversion -Wno-cast-function-type-strict" "CXXFLAGS=-Wno-cast-function-type-strict" bash "$tools/x-applearm.resumable.sh"
   write_file "$root/.built-rev" "$revision"
   [ "$DRY_RUN" -eq 1 ] || rm -rf "$resume"
   note "dependency stack built: $root"
