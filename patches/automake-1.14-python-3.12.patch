@@ -1,6 +1,6 @@
-diff --git a/py-compile b/py-compile
---- a/py-compile
-+++ b/py-compile
+diff --git a/lib/py-compile b/lib/py-compile
+--- a/lib/py-compile
++++ b/lib/py-compile
 @@ -119 +119 @@
 -import sys, os, py_compile, imp
 +import sys, os, py_compile, importlib.util

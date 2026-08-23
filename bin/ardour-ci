@@ -101,11 +101,11 @@ deps_build() {
   # readline/termcap archives.  Use GNU's primary archive host instead.
   run perl -0pi -e 's@http://ftpmirror\.gnu\.org/@https://ftp.gnu.org/gnu/@g' "$tools/x-applearm.sh"
   # libffi 3.4.2 needs the upstream Darwin ARM64 CFI fix on modern Apple Clang.
-  run perl -0pi -e "s@(src libffi-3\\.4\\.2 tar\\.gz [^\\n]+\\n)(PREFIX=.*nativebuild)@\$1patch -p1 < '$CI_ROOT/patches/libffi-3.4.2-darwin-arm64-cfi.patch'\\n\$2@g" "$tools/x-applearm.sh"
+  run perl -0pi -e "s@(src libffi-3\\.4\\.2 tar\\.gz [^\\n]+\\n)(PREFIX=.*nativebuild)@\$1patch --batch --forward -p1 < '$CI_ROOT/patches/libffi-3.4.2-darwin-arm64-cfi.patch'\\n\$2@g" "$tools/x-applearm.sh"
   # gettext 0.21 applies noreturn to the handler pointer but not its default
   # implementation; recent Apple Clang rejects that function-pointer mismatch.
   if ! grep -Fq 'gettext-0.21-clang-noreturn-handler.patch' "$tools/x-applearm.sh"; then
-    run perl -0pi -e "s@(src gettext-0\\.21 tar\\.gz [^\\n]+\\n)@\$1patch -p1 < '$CI_ROOT/patches/gettext-0.21-clang-noreturn-handler.patch'\\n@g" "$tools/x-applearm.sh"
+    run perl -0pi -e "s@(src gettext-0\\.21 tar\\.gz [^\\n]+\\n)@\$1patch --batch --forward -p1 < '$CI_ROOT/patches/gettext-0.21-clang-noreturn-handler.patch'\\n@g" "$tools/x-applearm.sh"
   fi
   # The recipe still names libffi 3.2.1's private include directory, but it
   # builds libffi 3.4.2, which installs its public headers in include/.
@@ -122,16 +122,16 @@ deps_build() {
   fi
   # GLib 2.56.4's GDBus generator imports distutils, removed in Python 3.12.
   if ! grep -Fq 'glib-2.56.4-python-3.12.patch' "$tools/x-applearm.sh"; then
-    run perl -0pi -e "s@(src glib-2\\.56\\.4 tar\\.xz [^\\n]+\\n)@\$1patch -p1 < '$CI_ROOT/patches/glib-2.56.4-python-3.12.patch'\\n@g" "$tools/x-applearm.sh"
+    run perl -0pi -e "s@(src glib-2\\.56\\.4 tar\\.xz [^\\n]+\\n)@\$1patch --batch --forward -p1 < '$CI_ROOT/patches/glib-2.56.4-python-3.12.patch'\\n@g" "$tools/x-applearm.sh"
   fi
   # GLib 2.56.4 declares locals after g_return_val_if_fail(), which its
   # strict C90 warning set treats as an error on modern Apple Clang.
   if ! grep -Fq 'glib-2.56.4-c99-declarations.patch' "$tools/x-applearm.sh"; then
-    run perl -0pi -e "s@(src glib-2\\.56\\.4 tar\\.xz [^\\n]+\\n(?:patch -p1 < '$CI_ROOT/patches/glib-2.56.4-python-3.12.patch'\\n)?)@\$1patch -p1 < '$CI_ROOT/patches/glib-2.56.4-c99-declarations.patch'\\n@g" "$tools/x-applearm.sh"
+    run perl -0pi -e "s@(src glib-2\\.56\\.4 tar\\.xz [^\\n]+\\n(?:patch --batch --forward -p1 < '$CI_ROOT/patches/glib-2.56.4-python-3.12.patch'\\n)?)@\$1patch --batch --forward -p1 < '$CI_ROOT/patches/glib-2.56.4-c99-declarations.patch'\\n@g" "$tools/x-applearm.sh"
   fi
   # Automake 1.14's py-compile imports imp, removed in Python 3.12.
   if ! grep -Fq 'automake-1.14-python-3.12.patch' "$tools/x-applearm.sh"; then
-    run perl -0pi -e "s@(src automake-1\\.14\\.1 tar\\.gz [^\\n]+\\n)@\$1patch -p1 < '$CI_ROOT/patches/automake-1.14-python-3.12.patch'\\n@g" "$tools/x-applearm.sh"
+    run perl -0pi -e "s@(src automake-1\\.14\\.1 tar\\.gz [^\\n]+\\n)@\$1patch --batch --forward -p1 < '$CI_ROOT/patches/automake-1.14-python-3.12.patch'\\n@g" "$tools/x-applearm.sh"
   fi
   # libvorbis 1.3.4 passes this obsolete Darwin linker flag through CFLAGS.
   # Recent Apple ld no longer accepts it when linking its test utility.
