@@ -4,7 +4,7 @@
 this repository separate from the Ardour checkout. It resolves the official
 macOS ARM64 `build-stack` revision from Ardour nightly information, builds that
 stack in an isolated local directory, compiles Ardour, and runs Ardour's normal
-macOS packager to create an unsigned public app bundle.
+macOS packager to create an unsigned public DMG containing the app bundle.
 
 The tool never runs `git pull`, `git rebase`, or `git checkout` in Ardour. You
 always choose and update the source revision yourself.
@@ -132,9 +132,9 @@ cd ../ardour-ci
 ./bin/ardour-ci package
 ```
 
-The `.app` and standard unsigned DMG are copied to
-`.work/artifacts/<ardour-commit>/`. The application bundle includes the video
-components requested by Ardour's `osx_build --public` packager.
+The standard unsigned DMG is copied to `.work/artifacts/<ardour-commit>/`.
+It contains the application bundle and the video components requested by
+Ardour's `osx_build --public` packager.
 
 For a complete build after the source directory and build-stack revision are
 configured, the equivalent shorthand is:
@@ -163,8 +163,8 @@ All commands are run as `./bin/ardour-ci <command>`.
   already complete.
 - `build` — configures and compiles the selected Ardour revision against the
   built dependency stack.
-- `package` — packages a completed build as an unsigned public `.app` bundle
-  and DMG, then copies them to the artifacts directory.
+- `package` — packages a completed build as an unsigned public DMG, then
+  copies it to the artifacts directory.
 - `all` — runs `doctor`, `deps build`, `build`, and `package` in that order.
 - `clean` — removes only the configured pipeline work directory, including its
   downloads, stacks, logs, and artifacts; it never removes the Ardour checkout.

@@ -26,7 +26,7 @@ Commands:
   deps sync                Lock the current official macOS ARM64 build-stack revision.
   deps build               Build or reuse the isolated dependency stack.
   build                    Configure and compile the selected Ardour revision.
-  package                  Create an unsigned public Ardour.app and DMG.
+  package                  Create an unsigned public Ardour DMG.
   all                      Run doctor, deps build, build, and package.
   clean                    Remove only this pipeline's .work directory.
 
@@ -219,31 +219,6 @@ write_build_metadata() {
   content=$(printf 'ardour_commit=%s\nardour_tag=%s\nbuild_stack_rev=%s\nconfiguration=--arm64 --optimize\nartifact=%s' "$(current_commit)" "${tag:-none}" "$(stack_rev)" "${artifact:-none}")
   write_file "$directory/metadata" "$content"
 }
-copy_app_from_dmg() {
-  local dmg=$1 artifacts=$2 attachment entity device='' mount='' app destination
-  attachment=$(hdiutil attach -nobrowse -readonly -plist "$dmg")
-  for entity in 0 1 2 3; do
-    mount=$(printf '%s\n' "$attachment" | plutil -extract "system-entities.$entity.mount-point" raw - 2>/dev/null || true)
-    [ -n "$mount" ] || continue
-    device=$(printf '%s\n' "$attachment" | plutil -extract "system-entities.$entity.dev-entry" raw - 2>/dev/null || true)
-    break
-  done
-  [ -n "$device" ] || die "could not mount package DMG: $dmg"
-  if [ -z "$mount" ]; then
-    hdiutil detach "$device" >/dev/null 2>&1 || true
-    die "could not determine package DMG mount point: $dmg"
-  fi
-  app=$(find "$mount" -maxdepth 1 -type d -name '*.app' -print -quit)
-  if [ -z "$app" ]; then
-    hdiutil detach "$device" >/dev/null 2>&1 || true
-    die "package DMG does not contain an application bundle: $dmg"
-  fi
-  destination="$artifacts/$(basename "$app")"
-  rm -rf "$destination"
-  ditto "$app" "$destination"
-  hdiutil detach "$device" >/dev/null
-  printf '%s\n' "$destination"
-}
 build_ardour() {
   require_source; ensure_stack
   local directory gtk
@@ -260,22 +235,16 @@ build_translations() {
 }
 package_ardour() {
   require_source; ensure_stack
-  local directory gtk packaging artifacts app dmg artifact_app
+  local directory gtk packaging artifacts dmg artifact_dmg
   directory=$(build_dir); [ -d "$directory" ] || die "Ardour is not built for $(current_commit); run: ardour-ci build"
   gtk=$(gtk_root); prepare_build_link "$directory"; prepare_packaging_share_link; build_translations "$directory"; packaging="$SOURCE_PATH/tools/osx_packaging"; artifacts="$WORK_DIR/artifacts/$(current_commit)"
   run mkdir -p "$artifacts"
   if [ "$DRY_RUN" -eq 1 ]; then note "dry-run: would run $packaging/osx_build --public --stack $gtk"; return; fi
   (cd "$packaging" && CACHEDIR="$WORK_DIR/video-cache" ./osx_build --public --stack "$gtk")
   dmg=$(find "$packaging" -maxdepth 1 -type f -name 'Ardour-*.dmg' -print -quit); [ -n "$dmg" ] || die "packaging did not create a DMG"
-  app=$(find "$packaging/Ardour" -maxdepth 1 -type d -name '*.app' -print -quit || true)
-  if [ -n "$app" ]; then
-    artifact_app="$artifacts/$(basename "$app")"
-    rm -rf "$artifact_app"; ditto "$app" "$artifact_app"
-  else
-    artifact_app=$(copy_app_from_dmg "$dmg" "$artifacts")
-  fi
-  cp "$dmg" "$artifacts/$(basename "$dmg")"
-  write_build_metadata "$directory" "$artifact_app"; note "package created: $artifact_app"
+  artifact_dmg="$artifacts/$(basename "$dmg")"
+  cp "$dmg" "$artifact_dmg"
+  write_build_metadata "$directory" "$artifact_dmg"; note "package created: $artifact_dmg"
 }
 clean_work() { [ "$WORK_DIR" != "$CI_ROOT" ] || die "refusing to remove repository root"; [ "$DRY_RUN" -eq 1 ] && { note "dry-run: would remove $WORK_DIR"; return; }; rm -rf "$WORK_DIR"; note "removed pipeline work directory: $WORK_DIR"; }
 
